@@ -91,11 +91,7 @@ public class AutoCompleteAdapter
                     Log.i("AutoCompleteAdapter", "currentLocation"+currentLocation);
                     if (currentLocation!=null && !currentLocation.getRoomName().isEmpty()) {
                         // если не комната, имя не пишем
-                        if (currentLocation.isRoom()){
-                            searchResult.add(0, currentLocation.copyForCurrentLocation());
-                        }else{
-                            searchResult.add(0, currentLocation.copyForCurrentLocationNotRoom());
-                        }
+                        searchResult.add(0, currentLocation.copyForCurrentLocation());
                     }
                     filterResults.values=searchResult;
                     Log.i("AutoCompleteAdapter", "filtering result list="+ searchResult);
@@ -122,7 +118,9 @@ public class AutoCompleteAdapter
 
         for (FloorId floorId:mapPointsData.keySet()){
             for (MapPoint mapPoint:mapPointsData.get(floorId)){
-                if (mapPoint.getRoomName().matches(constraint+".*?") && (mapPoint.isRoom() || accessLevel>0)){
+                // mapPoint.getRoomName().matches(constraint+".*?") for begin
+                if (!mapPoint.toString().equals(currentLocation.toString()) &&
+                        mapPoint.getRoomName().contains(constraint) && (mapPoint.isRoom() || accessLevel>0)){
                     result.add(mapPoint);
                 }
             }

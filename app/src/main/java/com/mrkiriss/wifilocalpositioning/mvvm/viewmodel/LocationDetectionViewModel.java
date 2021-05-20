@@ -23,10 +23,11 @@ import java.util.Objects;
 
 import javax.inject.Inject;
 
+import com.mrkiriss.wifilocalpositioning.mvvm.repositiries.TrainingMapRepository;
 import lombok.Data;
 
 @Data
-public class LocationDetectionViewModel extends ViewModel {
+public class LocationDetectionViewModel {
 
     private final LocationDetectionRepository repository;
 
@@ -38,6 +39,8 @@ public class LocationDetectionViewModel extends ViewModel {
     private final LiveData<String> requestToHideKeyboard;
     private final LiveData<Boolean> requestToUpdateProgressStatusBuildingRoute;
     private final LiveData<Integer> requestToUpdateAccessLevel;
+    private final LiveData<MapPoint> requestToUpdateCurrentLocationOnAutoComplete;
+    private final LiveData<String> requestToChangeDepartureInput;
 
     private final MutableLiveData<String> requestToRefreshFloor;
     private final MutableLiveData<String> toastContent;
@@ -63,6 +66,8 @@ public class LocationDetectionViewModel extends ViewModel {
         requestToHideKeyboard=repository.getRequestToHideKeyboard();
         requestToUpdateProgressStatusBuildingRoute=repository.getRequestToUpdateProgressStatusBuildingRoute();
         requestToUpdateAccessLevel=repository.getRequestToUpdateAccessLevel();
+        requestToUpdateCurrentLocationOnAutoComplete=repository.getRequestToUpdateCurrentLocationOnAutoComplete();
+        requestToChangeDepartureInput=repository.getRequestToChangeDepartureInput();
 
         floorNumber = new ObservableInt();
         findInput = new ObservableField<>("");
@@ -79,8 +84,8 @@ public class LocationDetectionViewModel extends ViewModel {
         showRoute.addOnPropertyChangedCallback(new Observable.OnPropertyChangedCallback() {
             @Override
             public void onPropertyChanged(Observable sender, int propertyId) {
-                if (requestToChangeFloorByMapPoint.getValue()!=null)
-                    departureInput.set(Objects.requireNonNull(requestToChangeFloorByMapPoint.getValue()).getRoomName());
+                /*if (requestToChangeFloorByMapPoint.getValue()!=null)
+                    departureInput.set(Objects.requireNonNull(requestToChangeFloorByMapPoint.getValue()).getRoomName());*/
 
                 repository.clearRouteFloors();
                 repository.setShowRoute(showRoute.get());

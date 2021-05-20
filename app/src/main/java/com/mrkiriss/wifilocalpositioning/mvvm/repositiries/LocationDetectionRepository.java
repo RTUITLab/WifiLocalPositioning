@@ -22,11 +22,14 @@ import com.mrkiriss.wifilocalpositioning.data.models.server.DefinedLocationPoint
 import com.mrkiriss.wifilocalpositioning.data.sources.settings.SettingsManager;
 import com.mrkiriss.wifilocalpositioning.utils.ConnectionManager;
 
+import org.jetbrains.annotations.NotNull;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import lombok.Data;
 import retrofit2.Call;
@@ -52,6 +55,8 @@ public class LocationDetectionRepository implements Serializable {
     private final MutableLiveData<Boolean> wifiEnabledState; // для отправки состояния включение wifi
     private final MutableLiveData<String> requestToHideKeyboard;
     private final MutableLiveData<Boolean> requestToUpdateProgressStatusBuildingRoute;
+    private final MutableLiveData<MapPoint> requestToUpdateCurrentLocationOnAutoComplete;
+    private final MutableLiveData<String> requestToChangeDepartureInput;
 
 
     private List<LocationPointInfo> listOfSearchableLocations;
@@ -78,6 +83,8 @@ public class LocationDetectionRepository implements Serializable {
         requestToAddAllPointsDataInAutoFinders=new MutableLiveData<>();
         requestToHideKeyboard=new MutableLiveData<>();
         requestToUpdateProgressStatusBuildingRoute=new MutableLiveData<>();
+        requestToUpdateCurrentLocationOnAutoComplete=new MutableLiveData<>();
+        requestToChangeDepartureInput=new MutableLiveData<>();
 
         wifiEnabledState=wifiScanner.getWifiEnabledState();
 
@@ -93,7 +100,9 @@ public class LocationDetectionRepository implements Serializable {
 
     // floor changing
     public void changeFloor(){
-        requestToChangeFloor.setValue(defineNecessaryFloor());
+        Floor requiredFloor = defineNecessaryFloor();
+        if (requiredFloor==null) return;
+        requestToChangeFloor.setValue(requiredFloor);
     }
     private Floor defineNecessaryFloor(){
         Floor requiredFloor;
@@ -118,6 +127,11 @@ public class LocationDetectionRepository implements Serializable {
             }
         }
 
+        if (requiredFloor==null){
+            Log.e("LocationDetectionRep", "required floor is null");
+            return null;
+        }
+        Log.i("LocationDetectionRep", "required floor is="+requiredFloor);
         return requiredFloor;
     }
     private Floor defineNecessaryFloorForShowCurrentLocation(){
@@ -161,13 +175,20 @@ public class LocationDetectionRepository implements Serializable {
     public void findRoom(String name){
         Map<FloorId, List<MapPoint>> data = mapImageManager.getDataOnPointsOnAllFloors();
         for (FloorId floorId:data.keySet()){
-            for (MapPoint mapPoint:data.get(floorId)){
+            for (MapPoint mapPoint: Objects.requireNonNull(data.get(floorId))){
                 if (mapPoint.getRoomName().equals(name) && (mapPoint.isRoom() || settingsManager.isModerator())){
-                    toastContent.setValue("Локация найдена");
                     // получает базовый этаж и вставялет его в объект точки, чтобы получить внутри фрагмента и прорисовать этаж
-                    mapPoint.setFloorWithPointer(mapImageManager.getBasicFloor(floorId));
+                    MapPoint result = mapPoint.copy();
+                    // изменяем номер этажа для успешного определения необходимого объекта Floor с помощью defineNecessaryFloor()
+                    currentFloorIdInt=result.getFloorIdInt();
+                    // определяем этаж и вставляем его в обхект для отправки
+                    result.setFloorWithPointer(defineNecessaryFloor());
+                    // изменяем строку ввода начала маршрута в меню построения маршрута
+                    requestToChangeDepartureInput.setValue(result.getRoomName());
+
                     // прорисовываем
-                    requestToChangeFloorByMapPoint.setValue(mapPoint);
+                    requestToChangeFloorByMapPoint.setValue(result);
+                    toastContent.setValue("Локация найдена");
 
                     return;
                 }
@@ -179,7 +200,7 @@ public class LocationDetectionRepository implements Serializable {
     // scanning
     public void startProcessingCompleteKitsOfScansResult(CompleteKitsContainer completeKitsContainer){
 
-        if (completeKitsContainer.getRequestSourceType()!=WifiScanner.TYPE_DEFINITION) return;
+        if (!completeKitsContainer.getRequestSourceType().equals(WifiScanner.TYPE_DEFINITION)) return;
 
         CalibrationLocationPoint calibrationLocationPoint = new CalibrationLocationPoint();
         for (List<ScanResult> oneScanResults: completeKitsContainer.getCompleteKits()) {
@@ -203,30 +224,43 @@ public class LocationDetectionRepository implements Serializable {
             return;
         }
 
+        Log.println(Log.INFO, "LocationDetectionRep",
+                String.format("start definition location with data=%s", calibrationLocationPoint));
+
         retrofit.defineLocation(calibrationLocationPoint).enqueue(new Callback<DefinedLocationPoint>() {
             @Override
-            public void onResponse(Call<DefinedLocationPoint> call, Response<DefinedLocationPoint> response) {
+            public void onResponse(@NotNull Call<DefinedLocationPoint> call, @NotNull Response<DefinedLocationPoint> response) {
                 wifiScanner.startDefiningScan(WifiScanner.TYPE_DEFINITION);
 
-                Log.println(Log.INFO, "GOOD_DEFINITION_ROOM",
-                        String.format("Server definition=%s", response.body()));
+                Log.println(Log.INFO, "LocationDetectionRep",
+                        String.format("Server define location result=%s", response.body()));
+                try {
+                    if (response.body() == null || response.body().getFloorId() == -1 || response.body().getRoomName() == null)
+                        return;
 
-                if (response.body()==null || response.body().getFloorId()==-1 || response.body().getRoomName()==null)return;
+                    // сохраняет в поле репозитория
+                    resultOfDefinition = convertToMapPoint(response.body());
 
-                // сохраняет в поле репозитория
-                resultOfDefinition=convertToMapPoint(response.body());
+                    Log.println(Log.INFO, "convert result= ",
+                            resultOfDefinition.toStringAllObject());
 
-                Log.println(Log.INFO, "SEND_CONVERT_RESULT",
-                        resultOfDefinition.toStringAllObject());
-
-                // уведомление о имени через тост
-                if (resultOfDefinition.isRoom() || settingsManager.isModerator()) toastContent.setValue("Местоположение: "+resultOfDefinition.getRoomName());
-                // требует изменение картинки этажа в соответсвии со всеми параметрами
-                changeFloor();
+                    // уведомление о имени через тост
+                    // + обновление текущего местоположения в автодополняющемся поиске
+                    // + обновление строки ввода начала маршруту в меню построения маршрута
+                    if (resultOfDefinition.isRoom() || settingsManager.isModerator()) {
+                        toastContent.setValue("Местоположение: " + resultOfDefinition.getRoomName());
+                        requestToUpdateCurrentLocationOnAutoComplete.setValue(resultOfDefinition);
+                        requestToChangeDepartureInput.setValue(resultOfDefinition.getRoomName());
+                    }
+                    // требует изменение картинки этажа в соответсвии со всеми параметрами
+                    changeFloor();
+                }catch (Exception e){
+                    e.printStackTrace();
+                }
             }
             @Override
             public void onFailure(Call<DefinedLocationPoint> call, Throwable t) {
-                Log.e("SERVER_ERROR", t.getMessage());
+                Log.e("SERVER_ERROR_LDRep", t.getMessage());
                 wifiScanner.startDefiningScan(WifiScanner.TYPE_DEFINITION);
             }
         });
@@ -237,6 +271,7 @@ public class LocationDetectionRepository implements Serializable {
         result.setX(definedLocationPoint.getX());
         result.setY(definedLocationPoint.getY());
         result.setRoomName(definedLocationPoint.getRoomName());
+        result.setFloorWithPointer(mapImageManager.getBasicFloor(Floor.convertFloorIdToEnum(definedLocationPoint.getFloorId())));
         result.setFloorIdInt(definedLocationPoint.getFloorId());
         result.setRoom(definedLocationPoint.isRoom());
 
@@ -248,11 +283,11 @@ public class LocationDetectionRepository implements Serializable {
         retrofit.getRoute(start, end).enqueue(new Callback<List<LocationPointInfo>>() {
             @Override
             public void onResponse(Call<List<LocationPointInfo>> call, Response<List<LocationPointInfo>> response) {
-                Log.println(Log.INFO, "GOOD_DEFINITION_ROOM",
+                Log.println(Log.INFO, "LocationDetectionRep",
                         String.format("Server route=%s", response.body()));
 
                 if (response.body()==null){
-                    Log.e("SERVER_ERROR", "Response body is null");
+                    Log.e("SERVER_ERROR_LDRep", "Response body is null");
                     toastContent.setValue("Маршрут построить не удалось");
                     return;
                 }

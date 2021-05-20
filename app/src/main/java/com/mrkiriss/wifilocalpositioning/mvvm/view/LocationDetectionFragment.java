@@ -76,14 +76,16 @@ public class LocationDetectionFragment extends Fragment {
         // прослушываем изменение пола, вызываем перерисовку
         viewModel.getRequestToChangeFloor().observe(getViewLifecycleOwner(), this::drawCurrentFloor);
         // прослышиваем запрос на изменение экрана с показом местоположения
-        viewModel.getRequestToChangeFloorByMapPoint().observe(getViewLifecycleOwner(), mapPoint -> {
+        viewModel.getRequestToChangeFloorByMapPoint().observe(getViewLifecycleOwner(), this::showCurrentLocation);
+        // прослушываем запрос на обновление местоположения для строки автодополнения и ...
+            // в меню маршрутизации при условии его скрытия в данный момент
+        viewModel.getRequestToUpdateCurrentLocationOnAutoComplete().observe(getViewLifecycleOwner(), mapPoint -> {
             // обновляем в адаптере для новой строки в поиске
-            autoCompleteAdapter.setCurrentLocation(mapPoint.copy());
-
-            // меняем номер во всей вьюмодели и вчастности на табло со стрелками
-            viewModel.getFloorNumber().set(mapPoint.getFloorIdInt());
-
-            showCurrentLocation(mapPoint);
+            autoCompleteAdapter.setCurrentLocation(mapPoint);
+        });
+        // прослушиваем обновление строки точки старта в меню построения маршрута
+        viewModel.getRequestToChangeDepartureInput().observe(getViewLifecycleOwner(), departureInput->{
+            if (!viewModel.getShowRoute().get())viewModel.getDepartureInput().set(departureInput);
         });
         // прослушиваем увеломления через Toast
         viewModel.getToastContent().observe(getViewLifecycleOwner(), this::showToastContent);
@@ -126,14 +128,14 @@ public class LocationDetectionFragment extends Fragment {
         hideKeyboard(requireActivity());
 
         viewModel.getFloorNumber().set(mapPoint.getFloorIdInt());
+
         drawCurrentLocation(mapPoint);
         Log.i("LocationDetectionFrg", "showCurrentLocation");
 
-        float x = (float)mapPoint.getX()/mapPoint.getFloorWithPointer().getFloorSchema().getWidth();
-        float y = (float)mapPoint.getY()/mapPoint.getFloorWithPointer().getFloorSchema().getHeight();
+        float x = (float) mapPoint.getX() / mapPoint.getFloorWithPointer().getFloorSchema().getWidth();
+        float y = (float) mapPoint.getY() / mapPoint.getFloorWithPointer().getFloorSchema().getHeight();
         Log.i("changeZoom", "x="+x+" y="+y);
         touchImageView.setZoom(6, x, y);
-
     }
 
     public static void hideKeyboard(Activity activity) {
